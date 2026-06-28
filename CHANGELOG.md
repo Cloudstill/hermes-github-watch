@@ -4,6 +4,22 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.0] - 2026-06-28
+
+### Added
+- **`trending` command**: lists repositories created today, sorted by stars.
+  De-duplicates coordinated spam clone-waves (same content under many
+  owner/repo names and edition variants) and hides clusters with ≥5 clones by
+  default (`--show-spam` to reveal). LLM-friendly point-in-time snapshot, no
+  state written.
+- **`analyze <owner/repo>` command**: pulls a repo's metadata + README (base64
+  decoded, capped at 6000 chars) + latest releases + recent commits as
+  sectioned, LLM-friendly structured text. No state written.
+- **LLM integration pattern** documented: `trending`/`analyze` feed a downstream
+  agent rather than calling an LLM in-process, keeping the script zero-dependency.
+- UTF-8 stdout/stderr reconfiguration so emoji/CJK in GitHub payloads (e.g.
+  READMEs) no longer crash on Windows' default GBK console.
+
 ## [1.1.0] - 2026-06-28
 
 ### Added

@@ -112,6 +112,8 @@ Then set `"github_token_file"` to its path (absolute, or relative to the script)
 | Command | Purpose |
 |---------|---------|
 | `query <target> [--kind user\|owner\|repo] [--sort pushed\|created\|updated] [--limit N]` | One-shot query, no state written, newest-first. |
+| `trending [--limit N] [--show-spam]` | Repositories created **today**, sorted by stars. De-duplicates spam clone-waves; `--show-spam` reveals them. LLM-friendly snapshot. |
+| `analyze <owner/repo>` | Pull a repo's metadata + README + latest releases + recent commits as structured, LLM-friendly text. No state written. |
 | `add <user>` / `add owner <user>` / `add <owner/repo> [--watch ...] [--branch ...]` | Add a monitor target. |
 | `remove <user\|owner/repo>` | Remove a target. |
 | `list` / `status` | Show targets / show runtime status (recorded items, last run, ETag cache). |
@@ -120,6 +122,16 @@ Then set `"github_token_file"` to its path (absolute, or relative to the script)
 | `--dry-run` / `--reset-state` / `help` | Utilities. |
 
 Full config reference: `github-watch-config.example.json`.
+
+### LLM integration (trending & analyze)
+
+`trending` and `analyze` are designed to feed an LLM, not call one — the script stays zero-dependency and single-responsibility (fetch + structure), and a downstream agent does the reasoning. Recommended flow in a Hermes agent:
+
+1. `github-watch.py trending --limit 10` → capture stdout
+2. Prompt the LLM: *"Here are today's top new GitHub repos. Pick the 2 most genuinely interesting (ignore game-cheat/trainer spam), and for each give a one-paragraph takeaway."*
+3. For any pick worth a deeper look: `github-watch.py analyze <owner/repo>` → feed that structured output back to the LLM for a full brief (positioning, tech stack, activity, recent direction).
+
+`analyze` output is sectioned with `## ` headers (`元信息` / `最近 Release` / `最近提交` / `README（节选）`) so an agent can split and cite. README is capped at 6000 chars to bound token cost.
 
 ### How dedup works (so you trust the silence)
 
@@ -239,6 +251,8 @@ icacls "$env:USERPROFILE\.github-token" /inheritance:r /grant:r "$env:USERNAME:(
 | 命令 | 用途 |
 |------|------|
 | `query <目标> [--kind user\|owner\|repo] [--sort pushed\|created\|updated] [--limit N]` | 一次性查询，不写状态，按时间倒序 |
+| `trending [--limit N] [--show-spam]` | **今日新建**仓库，按 star 倒序。自动去重刷量克隆波；`--show-spam` 可查看。供 LLM 分析 |
+| `analyze <owner/repo>` | 拉取单仓库元信息+README+近期 release+commit，输出结构化、LLM 友好的文本。不写状态 |
 | `add <用户>` / `add owner <用户>` / `add <owner/repo> [--watch ...] [--branch ...]` | 添加监控对象 |
 | `remove <用户\|owner/repo>` | 移除监控对象 |
 | `list` / `status` | 查看对象 / 查看运行状态（已记录动态、上次运行、ETag 缓存） |
@@ -247,6 +261,16 @@ icacls "$env:USERPROFILE\.github-token" /inheritance:r /grant:r "$env:USERNAME:(
 | `--dry-run` / `--reset-state` / `help` | 工具命令 |
 
 完整配置项见 `github-watch-config.example.json`。
+
+### LLM 集成（trending 与 analyze）
+
+`trending` 和 `analyze` 设计为**给 LLM 喂数据，而非自己调 LLM**——脚本保持零依赖、单一职责（取数+结构化），由下游 agent 做推理。在 Hermes agent 中的推荐流程：
+
+1. `github-watch.py trending --limit 10` → 捕获 stdout
+2. 提示 LLM：*"以下是今日 GitHub 最火的新建仓库。挑出 2 个真正有价值的（忽略游戏作弊器/训练器刷量），各给一段一句话点评。"*
+3. 对值得深挖的：`github-watch.py analyze <owner/repo>` → 把结构化输出喂回 LLM 做完整简报（项目定位、技术栈、活跃度、近期动向）。
+
+`analyze` 输出用 `## ` 标题分段（`元信息` / `最近 Release` / `最近提交` / `README（节选）`），方便 agent 切分与引用。README 截断在 6000 字符以控制 token 成本。
 
 ### 去重机制（让你信任它的静默）
 

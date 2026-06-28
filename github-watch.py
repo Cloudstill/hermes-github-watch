@@ -1036,6 +1036,234 @@ def command_query(config: dict[str, Any], target: str, kind: str, limit: int, so
     return 0
 
 
+def command_trending(config: dict[str, Any], limit: int, hide_spam: bool = True) -> int:
+    """List repositories created today, sorted by stars (most starred first).
+
+    Uses the search endpoint with created:>YYYY-MM-DD and sort=stars. This is a
+    point-in-time snapshot (no state, no dedup) — intended for an LLM-aware
+    consumer to digest. All languages, no fork filter applied by the search.
+    """
+    local_cfg = dict(config)
+    limit = max(1, min(limit, 30))
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    # created:>=today catches repos created since 00:00 UTC today.
+    query = f"created:>={today} sort:stars-desc"
+    errors: list[str] = []
+    # Fetch more than we show so we can de-duplicate same-name clones (a common
+    # spam pattern: many accounts upload identical repos on the same day).
+    fetch_n = max(limit * 3, limit + 10)
+    try:
+        data = api_get(
+            "/search/repositories",
+            local_cfg,
+            {"q": query, "sort": "stars", "order": "desc", "per_page": min(fetch_n, 100)},
+        )
+    except Exception as exc:
+        errors.append(str(exc))
+        data = None
+
+    raw_items = data.get("items") if isinstance(data, dict) else None
+    total = int(data.get("total_count", 0)) if isinstance(data, dict) else 0
+
+    if errors:
+        print("GitHub trending 查询失败:")
+        for e in errors:
+            print(f"- {e}")
+        return 0
+    if not raw_items:
+        print(f"今日（UTC {today}）暂无新建仓库数据。")
+        return 0
+
+    # De-duplicate spam waves: the same content often appears under many
+    # owner/repo names and slightly varied names (Foo, Foo-Extreme, Foo-Max...)
+    # on the same day. Cluster by normalized description, then by repo name,
+    # keeping the top-starred representative per cluster and noting how many
+    # clones were folded in.
+    def _cluster_key(repo: dict[str, Any]) -> str:
+        full = str(repo.get("full_name") or "")
+        name = full.split("/", 1)[-1].lower() if "/" in full else full.lower()
+        # Strip variant/edition words and year/version markers anywhere in the
+        # name so spam waves (Foo, Foo-Extreme, Foo-2026-Max ...) collapse to
+        # one cluster. Also remove non-alphanumerics for a fuzzier match.
+        name = re.sub(r"(extreme|mega|max|elite|plus|pro|ultra|turbo|edition|2026|v\d+)", "", name)
+        name = re.sub(r"[^a-z0-9]", "", name)
+        desc = first_line(str(repo.get("description") or ""), 160).lower()
+        if desc:
+            # Same idea for descriptions: drop variant words, then prefix so
+            # boilerplate that only differs by an edition word clusters together.
+            desc_norm = re.sub(r"(extreme|mega|max|elite|plus|pro|ultra|turbo|edition|2026|v\d+)", "", desc)
+            desc_norm = re.sub(r"[^a-z0-9]", "", desc_norm)
+            return desc_norm[:50] or name
+        return name
+
+    best_by_cluster: dict[str, dict[str, Any]] = {}
+    cluster_count: dict[str, int] = {}
+    for repo in raw_items:
+        if not isinstance(repo, dict):
+            continue
+        key = _cluster_key(repo)
+        cluster_count[key] = cluster_count.get(key, 0) + 1
+        prev = best_by_cluster.get(key)
+        if prev is None or (repo.get("stargazers_count", 0) > prev.get("stargazers_count", 0)):
+            best_by_cluster[key] = repo
+
+    ranked = sorted(
+        best_by_cluster.values(),
+        key=lambda r: r.get("stargazers_count", 0),
+        reverse=True,
+    )
+    # Optionally hide clusters that look like coordinated spam (many same-content
+    # clones uploaded the same day). Threshold: >=5 folded clones.
+    SPAM_THRESHOLD = 5
+    spam_hidden = 0
+    if hide_spam:
+        kept = []
+        for repo in ranked:
+            ckey = _cluster_key(repo)
+            if cluster_count.get(ckey, 1) >= SPAM_THRESHOLD:
+                spam_hidden += 1
+                continue
+            kept.append(repo)
+        ranked = kept
+    items = ranked[:limit]
+    deduped = len(items)
+
+    lines = [
+        f"今日（UTC {today}）热门新建仓库，共匹配 {total} 个，去重后展示 star 最高的 {deduped} 个（按 star 倒序）：",
+    ]
+    if hide_spam and spam_hidden:
+        lines.append(f"（已隐藏 {spam_hidden} 组疑似刷量仓库，用 --show-spam 查看）")
+    lines.append("")
+    for idx, repo in enumerate(items, start=1):
+        if not isinstance(repo, dict):
+            continue
+        full = str(repo.get("full_name") or "")
+        ckey = _cluster_key(repo)
+        stars = repo.get("stargazers_count", 0)
+        lang = str(repo.get("language") or "未指定")
+        desc = first_line(str(repo.get("description") or ""), 160)
+        created = str(repo.get("created_at") or "")
+        url = str(repo.get("html_url") or f"https://github.com/{full}")
+        clones = cluster_count.get(ckey, 1)
+        clone_note = f"  (⚠ 疑似刷量，已折叠 {clones} 个同类)" if clones > 1 else ""
+        lines.append(f"{idx}. {full}  ★ {stars}  [{lang}]{clone_note}")
+        if desc:
+            lines.append(f"   {desc}")
+        lines.append(f"   创建: {format_time(created, local_cfg)}")
+        lines.append(f"   链接: {url}")
+    print("\n".join(lines))
+    return 0
+
+
+def command_analyze(config: dict[str, Any], target: str) -> int:
+    """Pull a single repo's metadata + README + latest release + recent commits.
+
+    Output is structured and explicitly LLM-friendly: fenced sections separated
+    by clear markers so a downstream agent (Hermes) can split and reason over it.
+    No state is written.
+    """
+    local_cfg = dict(config)
+    repo = validate_repo(target.strip())
+    errors: list[str] = []
+
+    meta = None
+    readme = ""
+    releases: list[dict[str, Any]] = []
+    commits: list[dict[str, Any]] = []
+
+    try:
+        meta = api_get(f"/repos/{repo}", local_cfg)
+    except Exception as exc:
+        errors.append(f"meta: {exc}")
+    try:
+        # README endpoint returns JSON with base64-encoded content under the
+        # default Accept header our api_get uses; decode it here.
+        rd = api_get(f"/repos/{repo}/readme", local_cfg)
+        if isinstance(rd, dict):
+            content = str(rd.get("content") or "")
+            if content and rd.get("encoding") == "base64":
+                import base64
+                readme = base64.b64decode(content).decode("utf-8", errors="replace")
+            elif content:
+                readme = content
+        elif isinstance(rd, str):
+            readme = rd
+        # Truncate to keep payload bounded for an LLM consumer.
+        if len(readme) > 6000:
+            readme = readme[:6000] + "\n...[README truncated]"
+    except Exception as exc:
+        errors.append(f"readme: {exc}")
+    try:
+        rel = api_get(f"/repos/{repo}/releases", local_cfg, {"per_page": 3})
+        if isinstance(rel, list):
+            releases = [r for r in rel if isinstance(r, dict)]
+    except Exception as exc:
+        errors.append(f"releases: {exc}")
+    try:
+        cm = api_get(f"/repos/{repo}/commits", local_cfg, {"per_page": 5})
+        if isinstance(cm, list):
+            commits = [c for c in cm if isinstance(c, dict)]
+    except Exception as exc:
+        errors.append(f"commits: {exc}")
+
+    if meta is None and not errors:
+        print(f"未找到仓库: {repo}")
+        return 0
+
+    lines: list[str] = [f"# 仓库分析：{repo}", ""]
+    if isinstance(meta, dict):
+        lines.append("## 元信息")
+        lines.append(f"- 描述: {first_line(str(meta.get('description') or ''), 200)}")
+        lines.append(f"- Stars: {meta.get('stargazers_count', 0)}  Forks: {meta.get('forks_count', 0)}  Watchers: {meta.get('subscribers_count', 0)}")
+        lines.append(f"- 语言: {meta.get('language') or '未指定'}  License: {(meta.get('license') or {}).get('spdx_id') or '未指定'}")
+        lines.append(f"- 主页: {meta.get('homepage') or '无'}")
+        lines.append(f"- 创建于: {format_time(str(meta.get('created_at') or ''), local_cfg)}")
+        lines.append(f"- 最近推送: {format_time(str(meta.get('pushed_at') or ''), local_cfg)}")
+        topics = meta.get("topics")
+        if isinstance(topics, list) and topics:
+            lines.append(f"- Topics: {', '.join(str(t) for t in topics[:10])}")
+        lines.append(f"- 链接: {meta.get('html_url') or f'https://github.com/{repo}'}")
+        lines.append("")
+
+    if releases:
+        lines.append("## 最近 Release")
+        for rel in releases[:3]:
+            tag = rel.get("tag_name") or ""
+            name = rel.get("name") or tag
+            pub = rel.get("published_at") or ""
+            pre = " [prerelease]" if rel.get("prerelease") else ""
+            lines.append(f"- {name or tag}{pre} ({format_time(str(pub), local_cfg)}) tag={tag}")
+        lines.append("")
+
+    if commits:
+        lines.append("## 最近提交")
+        for cm in commits[:5]:
+            sha = str(cm.get("sha") or "")[:7]
+            info = cm.get("commit") if isinstance(cm.get("commit"), dict) else {}
+            msg = first_line(str(info.get("message") or ""), 120)
+            author = (info.get("author") or {}).get("name") if isinstance(info.get("author"), dict) else ""
+            lines.append(f"- {sha} {msg}" + (f" — {author}" if author else ""))
+        lines.append("")
+
+    if readme:
+        lines.append("## README（节选）")
+        lines.append("```")
+        lines.append(readme.strip())
+        lines.append("```")
+        lines.append("")
+
+    if errors:
+        lines.append("## 抓取过程中的错误")
+        for e in errors:
+            lines.append(f"- {e}")
+        lines.append("")
+
+    lines.append("## 分析提示")
+    lines.append("以上为仓库结构化信息，可供进一步分析：项目定位、技术栈、活跃度、近期动向等。")
+    print("\n".join(lines).strip())
+    return 0
+
+
 def print_dry_run(config: dict[str, Any]) -> int:
     items, errors = collect_all(config)
     ordered = sort_items_by_time(items)
@@ -1072,6 +1300,8 @@ def command_help() -> int:
                 "  /github query <用户名|owner/repo>           查询最新公开动态（自动识别用户/仓库）",
                 "  /github query <用户名> --kind owner --sort created  列出某用户名下仓库（按创建时间）",
                 "  /github query <用户名> --limit 20          指定展示条数（最新 N 条）",
+                "  /github trending [--limit N] [--show-spam]  今日新建的热门仓库（按 star 倒序，默认隐藏刷量，供 LLM 分析）",
+                "  /github analyze <owner/repo>               拉取单仓库元信息/README/release/commit（供 LLM 分析）",
                 "  /github list                               查看当前已配置的监控对象",
                 "  /github status                             查看监控状态（含已记录动态数、上次运行时间）",
                 "",
@@ -1101,6 +1331,14 @@ def command_help() -> int:
 
 
 def main(argv: list[str]) -> int:
+    # Force UTF-8 stdout/stderr so emoji/CJK from GitHub payloads (e.g. READMEs)
+    # don't crash on Windows' default GBK/cp936 console encoding.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
     parser = argparse.ArgumentParser(description="Watch GitHub updates for Hermes cron.")
     parser.add_argument("--dry-run", action="store_true", help="Fetch and print latest items without updating state.")
     parser.add_argument("--init-config", action="store_true", help="Create default config files and exit.")
@@ -1148,6 +1386,17 @@ def main(argv: list[str]) -> int:
     check_parser = subparsers.add_parser("check", help="Run one monitor check and update state.")
     check_parser.add_argument("--show-empty", action="store_true", help="Print a message even when there are no new items.")
 
+    trending_parser = subparsers.add_parser("trending", help="List repositories created today, sorted by stars (LLM-friendly snapshot).")
+    trending_parser.add_argument("--limit", type=int, default=10, help="Maximum repos to show (latest N by stars, max 30).")
+    trending_parser.add_argument(
+        "--show-spam",
+        action="store_true",
+        help="Show suspected spam clusters (>=5 same-content clones) instead of hiding them.",
+    )
+
+    analyze_parser = subparsers.add_parser("analyze", help="Pull a repo's metadata + README + releases + commits as LLM-friendly structured text.")
+    analyze_parser.add_argument("target", help="owner/repo to analyze.")
+
     args = parser.parse_args(argv)
 
     created = ensure_config_files()
@@ -1193,6 +1442,10 @@ def main(argv: list[str]) -> int:
         return command_remove(config, args.target)
     if args.command == "query":
         return command_query(config, args.target, args.kind, max(1, args.limit), args.sort)
+    if args.command == "trending":
+        return command_trending(config, max(1, args.limit), hide_spam=not args.show_spam)
+    if args.command == "analyze":
+        return command_analyze(config, args.target)
 
     if not config.get("enabled") and args.command != "check":
         return 0

@@ -1,5 +1,5 @@
 name: github-watch
-version: 1.1.0
+version: 1.2.0
 description: "Monitor GitHub activity (user events, owner repos incl. newly-created repos, repo releases/commits) as a zero-dependency Hermes cron plugin. Register /github commands."
 author: local
 kind: standalone
