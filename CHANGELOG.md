@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - **`analyze <owner/repo>` command**: pulls a repo's metadata + README (base64
   decoded, capped at 6000 chars) + latest releases + recent commits as
   sectioned, LLM-friendly structured text. No state written.
+- **GitHub URL acceptance**: every repo-taking command (`analyze`, `query`,
+  `add`, `remove`) now accepts full GitHub URLs and SSH strings in addition to
+  bare `owner/repo` — e.g. `analyze https://github.com/o/r/pulls`,
+  `git@github.com:o/r.git`. Trailing path/query/fragment/`.git` are stripped.
 - **LLM integration pattern** documented: `trending`/`analyze` feed a downstream
   agent rather than calling an LLM in-process, keeping the script zero-dependency.
 - UTF-8 stdout/stderr reconfiguration so emoji/CJK in GitHub payloads (e.g.

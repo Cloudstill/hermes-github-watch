@@ -824,8 +824,49 @@ def validate_login(login: str) -> str:
 
 def validate_repo(repo: str) -> str:
     value = repo.strip()
+    # Accept GitHub URLs / SSH strings and reduce them to owner/repo so users
+    # can paste e.g. https://github.com/owner/repo or git@github.com:owner/repo.git
+    value = _normalize_repo_target(value)
     if not REPO_RE.fullmatch(value):
-        raise SystemExit("Invalid repo. Use owner/repo, for example openai/openai-python.")
+        raise SystemExit("Invalid repo. Use owner/repo or a GitHub URL, for example openai/openai-python.")
+    return value
+
+
+def _normalize_repo_target(value: str) -> str:
+    """Reduce a GitHub URL / SSH string / bare owner-repo to 'owner/repo'.
+
+    Handles:
+      https://github.com/owner/repo
+      https://github.com/owner/repo/anything/after
+      http://github.com/owner/repo
+      github.com/owner/repo
+      git@github.com:owner/repo.git
+      ssh://git@github.com/owner/repo.git
+      owner/repo              (passed through)
+    Returns the input unchanged if it doesn't look like a GitHub reference,
+    so the caller's regex check produces the usual error for genuinely bad input.
+    """
+    if not value:
+        return value
+    # SSH form: git@github.com:owner/repo(.git)
+    m = re.match(r"^[^@\s]+@github\.com:([^/\s]+/[^/\s]+?)(?:\.git)?$", value)
+    if m:
+        return m.group(1)
+    # Anything containing github.com — take the first two path segments after it.
+    m = re.search(r"github\.com/(.+)", value)
+    if m:
+        tail = m.group(1)
+        # Drop query/fragment, then split on '/'.
+        tail = tail.split("?", 1)[0].split("#", 1)[0]
+        segs = [s for s in tail.split("/") if s]
+        if len(segs) >= 2:
+            candidate = f"{segs[0]}/{segs[1]}"
+            if candidate.endswith(".git"):
+                candidate = candidate[:-4]
+            return candidate
+    # Strip a trailing .git from a bare owner/repo.git too.
+    if value.endswith(".git") and "/" in value:
+        return value[:-4]
     return value
 
 
@@ -1301,7 +1342,7 @@ def command_help() -> int:
                 "  /github query <用户名> --kind owner --sort created  列出某用户名下仓库（按创建时间）",
                 "  /github query <用户名> --limit 20          指定展示条数（最新 N 条）",
                 "  /github trending [--limit N] [--show-spam]  今日新建的热门仓库（按 star 倒序，默认隐藏刷量，供 LLM 分析）",
-                "  /github analyze <owner/repo>               拉取单仓库元信息/README/release/commit（供 LLM 分析）",
+                "  /github analyze <owner/repo 或 GitHub URL>  拉取单仓库元信息/README/release/commit（供 LLM 分析）",
                 "  /github list                               查看当前已配置的监控对象",
                 "  /github status                             查看监控状态（含已记录动态数、上次运行时间）",
                 "",

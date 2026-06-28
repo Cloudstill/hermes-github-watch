@@ -113,7 +113,7 @@ Then set `"github_token_file"` to its path (absolute, or relative to the script)
 |---------|---------|
 | `query <target> [--kind user\|owner\|repo] [--sort pushed\|created\|updated] [--limit N]` | One-shot query, no state written, newest-first. |
 | `trending [--limit N] [--show-spam]` | Repositories created **today**, sorted by stars. De-duplicates spam clone-waves; `--show-spam` reveals them. LLM-friendly snapshot. |
-| `analyze <owner/repo>` | Pull a repo's metadata + README + latest releases + recent commits as structured, LLM-friendly text. No state written. |
+| `analyze <owner/repo>` | Pull a repo's metadata + README + latest releases + recent commits as structured, LLM-friendly text. No state written. Accepts a full GitHub URL too (`analyze https://github.com/o/r`). |
 | `add <user>` / `add owner <user>` / `add <owner/repo> [--watch ...] [--branch ...]` | Add a monitor target. |
 | `remove <user\|owner/repo>` | Remove a target. |
 | `list` / `status` | Show targets / show runtime status (recorded items, last run, ETag cache). |
@@ -252,7 +252,7 @@ icacls "$env:USERPROFILE\.github-token" /inheritance:r /grant:r "$env:USERNAME:(
 |------|------|
 | `query <目标> [--kind user\|owner\|repo] [--sort pushed\|created\|updated] [--limit N]` | 一次性查询，不写状态，按时间倒序 |
 | `trending [--limit N] [--show-spam]` | **今日新建**仓库，按 star 倒序。自动去重刷量克隆波；`--show-spam` 可查看。供 LLM 分析 |
-| `analyze <owner/repo>` | 拉取单仓库元信息+README+近期 release+commit，输出结构化、LLM 友好的文本。不写状态 |
+| `analyze <owner/repo>` | 拉取单仓库元信息+README+近期 release+commit，输出结构化、LLM 友好的文本。不写状态。也接受完整 GitHub URL（`analyze https://github.com/o/r`） |
 | `add <用户>` / `add owner <用户>` / `add <owner/repo> [--watch ...] [--branch ...]` | 添加监控对象 |
 | `remove <用户\|owner/repo>` | 移除监控对象 |
 | `list` / `status` | 查看对象 / 查看运行状态（已记录动态、上次运行、ETag 缓存） |
