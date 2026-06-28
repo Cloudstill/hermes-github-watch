@@ -1,0 +1,41 @@
+{
+  "enabled": true,
+  "timezone": "Asia/Shanghai",
+  "notify_first_run": false,
+  "notify_errors": true,
+  "max_items_per_run": 20,
+  "state_max_seen": 5000,
+  "github_token_env": "GITHUB_WATCH_TOKEN",
+  "github_token_file": "",
+  "github_token": "",
+  "users": [
+    {
+      "login": "torvalds",
+      "events": [
+        "PushEvent",
+        "ReleaseEvent",
+        "CreateEvent",
+        "PullRequestEvent",
+        "IssuesEvent"
+      ],
+      "max_events": 20
+    }
+  ],
+  "owners": [
+    {
+      "login": "openai",
+      "max_repos": 10,
+      "include_forks": false
+    }
+  ],
+  "repos": [
+    {
+      "repo": "openai/openai-python",
+      "watch": [
+        "releases",
+        "commits"
+      ],
+      "branch": ""
+    }
+  ]
+}

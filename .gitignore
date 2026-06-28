@@ -1,0 +1,13 @@
+# Runtime state and local config (do not commit)
+github-watch-state.json
+github-watch-config.json
+*.tmp
+
+# Secrets
+.github-token
+*.token
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
