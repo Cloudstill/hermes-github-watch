@@ -336,6 +336,83 @@ def first_line(text: str, limit: int = 120) -> str:
     return line[: limit - 3] + "..." if len(line) > limit else line
 
 
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F000-\U0001FAFF"   # symbols & pictographs, transport, etc.
+    "\U00002600-\U000027BF"   # misc symbols, dingbats
+    "\U0001F1E0-\U0001F1FF"   # regional indicators (flags)
+    "\U00002B00-\U00002BFF"   # misc symbols & arrows
+    "\U0001F900-\U0001F9FF"   # supplemental symbols
+    "\U0000FE00-\U0000FE0F"   # variation selectors
+    "\U0000200D"              # zero-width joiner
+    "]+",
+    flags=re.UNICODE,
+)
+
+
+def _strip_emoji(text: str) -> str:
+    """Remove common emoji so chat output stays clean and consistent."""
+    return _EMOJI_RE.sub("", text).strip()
+
+
+def summarize_readme(readme: str, max_chars: int = 400) -> str:
+    """Reduce a raw README to a compact prose summary for a human reader.
+
+    Strips the parts that are noise — badge images, raw HTML, code fences,
+    link URLs, heading markers, and emoji — then collapses blank lines and
+    truncates to ``max_chars``. Keeps the intro/positioning text and the first
+    few feature bullets, which is usually what tells you what a project IS.
+    """
+    if not readme:
+        return ""
+    lines: list[str] = []
+    in_fence = False
+    for raw in readme.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue  # skip code blocks
+        if not stripped:
+            lines.append("")
+            continue
+        # Drop badge-only lines (lines that are essentially a run of images).
+        if "<img" in stripped or stripped.startswith("!["):
+            continue
+        s = stripped
+        # Remove inline images ![alt](url)
+        s = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", s)
+        # Reduce markdown links [text](url) -> text
+        s = re.sub(r"\[([^\]]+)\]\([^)]*\)", r"\1", s)
+        # Strip HTML tags
+        s = re.sub(r"<[^>]+>", "", s)
+        # Drop leading heading markers but keep the text
+        s = re.sub(r"^#{1,6}\s+", "", s)
+        # Drop leading list markers, keep content (bullets read cleaner inline)
+        s = re.sub(r"^[-*+]\s+", "", s)
+        # Strip emoji (render inconsistently across chat clients and add noise)
+        s = _strip_emoji(s)
+        s = s.strip()
+        if s:
+            lines.append(s)
+    # Collapse runs of blank lines.
+    out: list[str] = []
+    blank = False
+    for ln in lines:
+        if ln == "":
+            if not blank:
+                out.append("")
+                blank = True
+        else:
+            out.append(ln)
+            blank = False
+    text = "\n".join(out).strip()
+    if len(text) > max_chars:
+        text = text[:max_chars].rstrip() + "\n...[README 摘要截断]"
+    return text
+
+
 def sort_items_by_time(items: list[WatchItem]) -> list[WatchItem]:
     """Sort newest-first by raw timestamp; items without a parseable time sink to the end."""
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
@@ -1229,9 +1306,9 @@ def command_analyze(config: dict[str, Any], target: str) -> int:
                 readme = content
         elif isinstance(rd, str):
             readme = rd
-        # Truncate to keep payload bounded for an LLM consumer.
-        if len(readme) > 6000:
-            readme = readme[:6000] + "\n...[README truncated]"
+        # Reduce the full README to a compact summary (badges/html/code stripped,
+        # ~600 chars) so the LLM gets the project's positioning, not its noise.
+        readme = summarize_readme(readme)
     except Exception as exc:
         errors.append(f"readme: {exc}")
     try:
@@ -1287,20 +1364,15 @@ def command_analyze(config: dict[str, Any], target: str) -> int:
         lines.append("")
 
     if readme:
-        lines.append("## README（节选）")
-        lines.append("```")
-        lines.append(readme.strip())
-        lines.append("```")
+        lines.append("## README 摘要")
+        lines.append(readme)
         lines.append("")
 
     if errors:
         lines.append("## 抓取过程中的错误")
         for e in errors:
             lines.append(f"- {e}")
-        lines.append("")
 
-    lines.append("## 分析提示")
-    lines.append("以上为仓库结构化信息，可供进一步分析：项目定位、技术栈、活跃度、近期动向等。")
     print("\n".join(lines).strip())
     return 0
 

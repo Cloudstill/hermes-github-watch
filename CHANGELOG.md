@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.1] - 2026-07-01
+
+### Changed
+- **`analyze` no longer dumps the full README.** Previously it emitted up to
+  6000 chars of raw README markdown (badges, code fences, HTML, link URLs and
+  all). It now emits a compact ~400-char cleaned summary: strips badge images,
+  HTML, code fences, link URLs, heading markers, list bullets, and emoji;
+  flattens to prose. Output dropped from 6KB+ to ~2KB.
+- Removed the agent-directed "analysis task" prompt section — `analyze` is a
+  plugin command whose return value is delivered verbatim (the Hermes agent
+  does not take a second reasoning pass on it), so that prompt was noise for
+  human readers. The command now returns clean structured data only.
+
 ## [1.2.0] - 2026-06-28
 
 ### Added
