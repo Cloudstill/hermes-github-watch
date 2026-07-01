@@ -4,6 +4,16 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [1.2.2] - 2026-07-01
+
+### Added
+- **Hermes cron wrapper examples** (`examples/hermes-cron/`): two thin wrappers
+  (`github-trending-cron.py`, `github-watch-check-cron.py`) plus a README
+  documenting the two Hermes gotchas they work around — `--script` taking a
+  bare path with no CLI args, and Windows GBK codepage crashing the stdout
+  capture. Wrappers emit in the system ANSI codepage (replacing unrepresentable
+  chars), retry once on failure, and surface errors instead of going silent.
+
 ## [1.2.1] - 2026-07-01
 
 ### Changed
