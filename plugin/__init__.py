@@ -17,6 +17,7 @@ USAGE = """GitHub 监控命令（输入 /github help 查看完整说明）：
   /github query <用户名|owner/repo>            查询最新公开动态
   /github query <用户名> --kind owner --sort created   列出某用户名下仓库（按创建时间）
   /github query <用户名> --limit 20            指定展示最新 N 条
+  /github get <用户名> [--limit N]             获取公开仓库概况、Star、Fork 和最后更新时间
   /github trending [--limit N] [--show-spam]   今日新建热门仓库（按 star 倒序，默认隐藏刷量，供 LLM 分析）
   /github analyze <owner/repo 或 GitHub URL>   拉取单仓库元信息/README/release/commit（供 LLM 分析）
   /github list                                 查看已配置监控对象

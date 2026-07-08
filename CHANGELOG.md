@@ -4,6 +4,14 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+- **`get <user> [--limit N]` command**: fetches every public repository owned by
+  a GitHub user and prints a compact per-repo summary with description, stars,
+  forks, primary language, last updated time, fork marker, and link. Omitting
+  `--limit` or setting it to `0` shows all repositories.
+
 ## [1.2.2] - 2026-07-01
 
 ### Added

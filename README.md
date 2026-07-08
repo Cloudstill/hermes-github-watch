@@ -68,6 +68,7 @@ Empty output → nothing new → the cron tick is silent.
 python github-watch.py --init-config     # generates config + example
 # edit github-watch-config.json: enabled=true, add targets, point github_token_file at a token file
 python github-watch.py query torvalds --limit 15        # one-shot query, newest-first
+python github-watch.py get torvalds                     # all public repos with stars/forks/updated time
 python github-watch.py check                            # stateful check (what cron runs)
 ```
 
@@ -112,6 +113,7 @@ Then set `"github_token_file"` to its path (absolute, or relative to the script)
 | Command | Purpose |
 |---------|---------|
 | `query <target> [--kind user\|owner\|repo] [--sort pushed\|created\|updated] [--limit N]` | One-shot query, no state written, newest-first. |
+| `get <user> [--limit N]` | Fetch public repositories owned by a user, including description, stars, forks, language, last updated time, and link. `--limit 0` or omitted means all. |
 | `trending [--limit N] [--show-spam]` | Repositories created **today**, sorted by stars. De-duplicates spam clone-waves; `--show-spam` reveals them. LLM-friendly snapshot. |
 | `analyze <owner/repo>` | Pull a repo's metadata + README + latest releases + recent commits as structured, LLM-friendly text. No state written. Accepts a full GitHub URL too (`analyze https://github.com/o/r`). |
 | `add <user>` / `add owner <user>` / `add <owner/repo> [--watch ...] [--branch ...]` | Add a monitor target. |
@@ -207,6 +209,7 @@ GitHub 监控发现 3 条新动态（按时间倒序，展示最新 3 条）
 python github-watch.py --init-config     # 生成配置 + 示例
 # 编辑 github-watch-config.json：enabled=true，添加监控对象，把 github_token_file 指向 token 文件
 python github-watch.py query torvalds --limit 15        # 一次性查询，按时间倒序
+python github-watch.py get torvalds                     # 获取公开仓库概况、star/fork、更新时间
 python github-watch.py check                            # 有状态检查（cron 调用）
 ```
 
@@ -251,6 +254,7 @@ icacls "$env:USERPROFILE\.github-token" /inheritance:r /grant:r "$env:USERNAME:(
 | 命令 | 用途 |
 |------|------|
 | `query <目标> [--kind user\|owner\|repo] [--sort pushed\|created\|updated] [--limit N]` | 一次性查询，不写状态，按时间倒序 |
+| `get <用户> [--limit N]` | 获取该用户名下公开仓库的概况、star 数、fork 数、语言、最后更新时间和链接。省略 `--limit` 或设为 `0` 表示全部 |
 | `trending [--limit N] [--show-spam]` | **今日新建**仓库，按 star 倒序。自动去重刷量克隆波；`--show-spam` 可查看。供 LLM 分析 |
 | `analyze <owner/repo>` | 拉取单仓库元信息+README+近期 release+commit，输出结构化、LLM 友好的文本。不写状态。也接受完整 GitHub URL（`analyze https://github.com/o/r`） |
 | `add <用户>` / `add owner <用户>` / `add <owner/repo> [--watch ...] [--branch ...]` | 添加监控对象 |

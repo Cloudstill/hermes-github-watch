@@ -747,6 +747,32 @@ def collect_owner_repos(
     return items
 
 
+def collect_user_repo_summaries(login: str, config: dict[str, Any]) -> list[dict[str, Any]]:
+    """Fetch all public repositories owned by a user, newest-updated first."""
+    repos: list[dict[str, Any]] = []
+    page = 1
+    per_page = 100
+    while True:
+        data = api_get(
+            f"/users/{urllib.parse.quote(login)}/repos",
+            config,
+            {
+                "sort": "updated",
+                "direction": "desc",
+                "per_page": per_page,
+                "page": page,
+                "type": "owner",
+            },
+        )
+        if not isinstance(data, list) or not data:
+            break
+        repos.extend(repo for repo in data if isinstance(repo, dict))
+        if len(data) < per_page:
+            break
+        page += 1
+    return repos
+
+
 def _collect_repo_target(
     repo_cfg: dict[str, Any], config: dict[str, Any], state: dict[str, Any] | None
 ) -> list[WatchItem]:
@@ -1154,6 +1180,58 @@ def command_query(config: dict[str, Any], target: str, kind: str, limit: int, so
     return 0
 
 
+def _repo_count(repo: dict[str, Any], key: str) -> int:
+    value = repo.get(key)
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.isdigit():
+        return int(value)
+    return 0
+
+
+def command_get(config: dict[str, Any], username: str, limit: int = 0) -> int:
+    login = validate_login(username)
+    try:
+        repos = collect_user_repo_summaries(login, config)
+    except Exception as exc:
+        print(f"GitHub 获取失败: {exc}")
+        return 0
+
+    if not repos:
+        print(f"{login} 没有公开仓库。")
+        return 0
+
+    shown_repos = repos if limit <= 0 else repos[:limit]
+    suffix = "展示全部" if len(shown_repos) == len(repos) else f"展示前 {len(shown_repos)} 个"
+    lines = [f"{login} 公开仓库概况（共 {len(repos)} 个，按最后更新时间倒序，{suffix}）", ""]
+    for idx, repo in enumerate(shown_repos, start=1):
+        full_name = str(repo.get("full_name") or repo.get("name") or "")
+        if not full_name:
+            continue
+        description = first_line(str(repo.get("description") or ""), 160) or "无描述"
+        stars = _repo_count(repo, "stargazers_count")
+        forks = _repo_count(repo, "forks_count")
+        language = str(repo.get("language") or "未知")
+        updated = format_time(str(repo.get("updated_at") or repo.get("pushed_at") or ""), config) or "未知"
+        html_url = str(repo.get("html_url") or f"https://github.com/{full_name}")
+        fork_mark = "（fork）" if repo.get("fork") else ""
+
+        lines.append(f"{idx}. {full_name}{fork_mark}")
+        lines.append(f"   概况: {description}")
+        lines.append(f"   Star: {stars} | Fork: {forks} | 语言: {language}")
+        lines.append(f"   最后更新时间: {updated}")
+        lines.append(f"   链接: {html_url}")
+
+    if len(shown_repos) < len(repos):
+        lines.append("")
+        lines.append(f"还有 {len(repos) - len(shown_repos)} 个仓库未展示；使用 /github get {login} --limit 0 可展示全部。")
+
+    print("\n".join(lines))
+    return 0
+
+
 def command_trending(config: dict[str, Any], limit: int, hide_spam: bool = True) -> int:
     """List repositories created today, sorted by stars (most starred first).
 
@@ -1413,6 +1491,7 @@ def command_help() -> int:
                 "  /github query <用户名|owner/repo>           查询最新公开动态（自动识别用户/仓库）",
                 "  /github query <用户名> --kind owner --sort created  列出某用户名下仓库（按创建时间）",
                 "  /github query <用户名> --limit 20          指定展示条数（最新 N 条）",
+                "  /github get <用户名> [--limit N]           获取公开仓库概况、Star、Fork 和最后更新时间",
                 "  /github trending [--limit N] [--show-spam]  今日新建的热门仓库（按 star 倒序，默认隐藏刷量，供 LLM 分析）",
                 "  /github analyze <owner/repo 或 GitHub URL>  拉取单仓库元信息/README/release/commit（供 LLM 分析）",
                 "  /github list                               查看当前已配置的监控对象",
@@ -1496,6 +1575,10 @@ def main(argv: list[str]) -> int:
         help="Repo ordering for --kind owner. Use 'created' to see newest repositories first.",
     )
 
+    get_parser = subparsers.add_parser("get", help="Get public repository summaries for a user.")
+    get_parser.add_argument("username", help="GitHub username.")
+    get_parser.add_argument("--limit", type=int, default=0, help="Maximum repos to show. 0 means all.")
+
     check_parser = subparsers.add_parser("check", help="Run one monitor check and update state.")
     check_parser.add_argument("--show-empty", action="store_true", help="Print a message even when there are no new items.")
 
@@ -1555,6 +1638,8 @@ def main(argv: list[str]) -> int:
         return command_remove(config, args.target)
     if args.command == "query":
         return command_query(config, args.target, args.kind, max(1, args.limit), args.sort)
+    if args.command == "get":
+        return command_get(config, args.username, max(0, args.limit))
     if args.command == "trending":
         return command_trending(config, max(1, args.limit), hide_spam=not args.show_spam)
     if args.command == "analyze":
