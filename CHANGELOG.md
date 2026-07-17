@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   forks, primary language, last updated time, fork marker, and link. Omitting
   `--limit` or setting it to `0` shows all repositories.
 
+### Changed
+- **More resilient HTTP retry backoff.** The default `retry_backoffs` schedule
+  is now `[1, 2, 4, 8, 16, 30]` seconds (7 attempts) instead of `[1, 2]` (3),
+  so a check usually completes even when the path to api.github.com
+  intermittently resets TLS mid-handshake (`SSL UNEXPECTED_EOF_WHILE_READING`).
+  Retries apply only to transient 5xx and network errors - auth (401) and
+  rate-limit (403) still fail fast. The schedule is now configurable via the
+  `retry_backoffs` config field.
+
 ## [1.2.2] - 2026-07-01
 
 ### Added

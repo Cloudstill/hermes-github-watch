@@ -139,6 +139,10 @@ Full config reference: `github-watch-config.example.json`.
 
 Every item gets a stable key: releases use id/tag, commits use full SHA, owner-repo updates use `name + pushed_at` (the timestamp changes only on a real push, so each push notifies once and quiet periods stay quiet), new-repo alerts use `name`. Keys persist in `github-watch-state.json`. **The first run never spams** — it records a baseline without reporting (unless `notify_first_run: true`). State is LRU-capped (`state_max_seen`, default 5000) and the ETag cache is pruned each run, so it stays bounded.
 
+### Retry behavior
+
+Each GitHub request retries transient failures (5xx and network/TLS errors) with backoff `[1, 2, 4, 8, 16, 30]` seconds by default - resilient enough to ride out an intermittently-reset path to `api.github.com` (where a sizeable fraction of TLS handshakes get cut). Auth (401) and rate-limit (403) errors fail fast without retry. Override the schedule via the `retry_backoffs` config field.
+
 ### Limitations & honest trade-offs
 
 - **No built-in notification channel.** Output is stdout text; delivery (email/Telegram/Discord/…) is the cron runner's job. Intentional for the plugin model — for a batteries-included multi-channel notifier, [iamspido/github-release-monitor](https://github.com/iamspido/github-release-monitor) is excellent.
@@ -279,6 +283,10 @@ icacls "$env:USERPROFILE\.github-token" /inheritance:r /grant:r "$env:USERNAME:(
 ### 去重机制（让你信任它的静默）
 
 每条动态有稳定 key：release 用 id/tag，commit 用完整 SHA，名下仓库更新用 `name + pushed_at`（时间戳只在真有新 push 时变化，所以每次 push 只通知一次，安静期不扰民），新建仓库用 `name`。key 持久化在 `github-watch-state.json`。**首次运行绝不刷屏**——只记录基线不通知（除非 `notify_first_run: true`）。状态按 LRU 封顶（`state_max_seen`，默认 5000），ETag 缓存每次运行裁剪，保持有界。
+
+### 重试行为
+
+每个 GitHub 请求对瞬时失败（5xx 与网络/TLS 错误）按 `[1, 2, 4, 8, 16, 30]` 秒退避重试，默认即足以扛住到 `api.github.com` 的偶发 TLS 中断路径（相当比例的握手会被掐断）。鉴权（401）与限流（403）不重试、立即失败。可通过配置项 `retry_backoffs` 覆盖该时间表。
 
 ### 局限与坦诚的取舍
 

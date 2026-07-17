@@ -52,8 +52,12 @@ QUERY_USER_EVENTS = DEFAULT_USER_EVENTS + ["WatchEvent", "ForkEvent"]
 # Valid watch kinds for a repo target.
 VALID_REPO_WATCHES = {"releases", "commits"}
 
-# HTTP retry backoff (seconds) for transient 5xx / network errors.
-RETRY_BACKOFFS = [1.0, 2.0]
+# HTTP retry backoff schedule (seconds) for transient 5xx / network errors.
+# Resilient by default: network paths to api.github.com can intermittently
+# reset TLS mid-handshake (SSL UNEXPECTED_EOF_WHILE_READING), so enough retries
+# let a check usually complete even when a large fraction of attempts fail.
+# Override per-deploy via the `retry_backoffs` config field.
+RETRY_BACKOFFS = [1.0, 2.0, 4.0, 8.0, 16.0, 30.0]
 
 # Upper bound on the per-owner known-repo baseline retained in state, so the
 # union-accumulation in collect_owner_repos cannot grow without limit.
@@ -263,8 +267,11 @@ def api_get(path: str, config: dict[str, Any], params: dict[str, Any] | None = N
     if etag:
         headers["If-None-Match"] = etag
 
+    backoffs = config.get("retry_backoffs")
+    if not isinstance(backoffs, list) or not backoffs:
+        backoffs = RETRY_BACKOFFS
     last_exc: Exception | None = None
-    for attempt in range(len(RETRY_BACKOFFS) + 1):
+    for attempt in range(len(backoffs) + 1):
         req = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=25) as resp:
@@ -278,9 +285,9 @@ def api_get(path: str, config: dict[str, Any], params: dict[str, Any] | None = N
             if exc.code == 304:
                 # Not modified since last fetch; caller treats None as "no new data".
                 return None
-            if exc.code >= 500 and attempt < len(RETRY_BACKOFFS):
+            if exc.code >= 500 and attempt < len(backoffs):
                 last_exc = exc
-                time.sleep(RETRY_BACKOFFS[attempt])
+                time.sleep(backoffs[attempt])
                 continue
             body = ""
             try:
@@ -293,9 +300,9 @@ def api_get(path: str, config: dict[str, Any], params: dict[str, Any] | None = N
                 rate = f" rate_limit_reset={format_time(int(reset), config)}"
             raise GitHubError(f"GitHub API {exc.code} for {url}.{rate} {body[:300]}") from exc
         except urllib.error.URLError as exc:
-            if attempt < len(RETRY_BACKOFFS):
+            if attempt < len(backoffs):
                 last_exc = exc
-                time.sleep(RETRY_BACKOFFS[attempt])
+                time.sleep(backoffs[attempt])
                 continue
             raise GitHubError(f"GitHub request failed for {url}: {exc}") from exc
     # Exhausted retries on a transient error.
